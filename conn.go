@@ -22,8 +22,7 @@ type (
 
 	NewConn func(Conn) Conn
 
-	// @todo should be private
-	BaseConn struct {
+	baseConn struct {
 		net.Conn
 		CancelFunc context.CancelFunc
 		idle       atomicBool
@@ -59,12 +58,12 @@ func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
 func (b *atomicBool) setFalse()   { atomic.StoreInt32((*int32)(b), 0) }
 
 func NewBaseConn(conn net.Conn) Conn {
-	return &BaseConn{
+	return &baseConn{
 		Conn: conn,
 	}
 }
 
-func (bc *BaseConn) Read(buf []byte) (n int, err error) {
+func (bc *baseConn) Read(buf []byte) (n int, err error) {
 	n, err = bc.Conn.Read(buf)
 	if err != nil && bc.CancelFunc != nil {
 		bc.CancelFunc()
@@ -72,7 +71,7 @@ func (bc *BaseConn) Read(buf []byte) (n int, err error) {
 	return
 }
 
-func (bc *BaseConn) Write(buf []byte) (n int, err error) {
+func (bc *baseConn) Write(buf []byte) (n int, err error) {
 	n, err = bc.Conn.Write(buf)
 	if err != nil && bc.CancelFunc != nil {
 		bc.CancelFunc()
@@ -80,19 +79,19 @@ func (bc *BaseConn) Write(buf []byte) (n int, err error) {
 	return
 }
 
-func (bc *BaseConn) Flush() error {
+func (bc *baseConn) Flush() error {
 	return nil
 }
 
-func (bc *BaseConn) SetCancelFunc(cancel context.CancelFunc) {
+func (bc *baseConn) SetCancelFunc(cancel context.CancelFunc) {
 	bc.CancelFunc = cancel
 }
 
-func (bc *BaseConn) Stats() (int64, int64) {
+func (bc *baseConn) Stats() (int64, int64) {
 	return 0, 0
 }
 
-func (bc *BaseConn) SetIdle(idle bool) {
+func (bc *baseConn) SetIdle(idle bool) {
 	if idle {
 		bc.idle.setTrue()
 	} else {
@@ -100,11 +99,11 @@ func (bc *BaseConn) SetIdle(idle bool) {
 	}
 }
 
-func (bc *BaseConn) IsIdle() bool {
+func (bc *baseConn) IsIdle() bool {
 	return bc.idle.isSet()
 }
 
-func (bc *BaseConn) Peek(int) ([]byte, error) {
+func (bc *baseConn) Peek(int) ([]byte, error) {
 	// @todo emulate by Read
 	panic("gtcp: Peek not implemented")
 }
