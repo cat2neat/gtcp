@@ -466,10 +466,6 @@ func TestTrafficStatistics(t *testing.T) {
 	}
 }
 
-func TestLogger(t *testing.T) {
-	gtcp.DefaultLogger.Errorf("gtcp_test: t=%+v\n", t)
-}
-
 func testConnTracker(ct gtcp.ConnTracker,
 	connHandler func(gtcp.ConnTracker, gtcp.Conn),
 	finishHandler func(gtcp.ConnTracker),
@@ -752,7 +748,7 @@ func connectTcpClient(port int, t *testing.T) {
 
 func TestServerPanicHandler(t *testing.T) {
 	go gtcp.ListenAndServe(":1981", func(ctx context.Context, conn gtcp.Conn) {
-		panic("gtcp: intentional panic")
+		panic(gtcp.ErrAbortHandler)
 	})
 	connectTcpClient(1981, t)
 }
@@ -770,7 +766,7 @@ func TestServerWithLimitter(t *testing.T) {
 	go srv.ListenAndServe()
 	defer srv.Shutdown(context.Background())
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			connectTcpClient(1982, t)
