@@ -157,13 +157,15 @@ func (s *Server) Serve(l net.Listener) error {
 
 	s.listener = l
 
-	base := context.Background()
+	// context per listener
+	// notify goroutines executing ConnHandler that your listner got closed
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	for {
 		rw, e := l.Accept()
 		if e != nil {
 			select {
 			case <-s.getDoneChan():
-				// @todo notify children contexts
 				return ErrServerClosed
 			default:
 			}
@@ -181,7 +183,7 @@ func (s *Server) Serve(l net.Listener) error {
 		if s.NewConn != nil {
 			conn = s.NewConn(conn)
 		}
-		s.serve(base, conn)
+		s.serve(ctx, conn)
 	}
 }
 

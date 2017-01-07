@@ -634,7 +634,6 @@ func TestSetPipelineHandler(t *testing.T) {
 	srv.ConnHandler(ctx, c)
 	srv.SetPipelineHandler(1, func(r io.Reader) ([]byte, error) {
 		panic("gtcp_test: panic for PipelineReader test")
-		return nil, errTest
 	}, func(buf []byte, wf gtcp.WriteFlusher) error {
 		return nil
 	})
@@ -736,7 +735,7 @@ func TestServerNilHandler(t *testing.T) {
 	gtcp.ListenAndServe(":1980", nil)
 }
 
-func doTcpClient(port int, t *testing.T) {
+func connectTcpClient(port int, t *testing.T) {
 	addr := &net.TCPAddr{
 		IP:   net.ParseIP("localhost"),
 		Port: port,
@@ -746,14 +745,16 @@ func doTcpClient(port int, t *testing.T) {
 	if err != nil {
 		t.Fatalf("gtcp_test: err: %+v\n", err)
 	}
-	conn.Close()
+	// block until socket closed by server
+	var buf [4]byte
+	conn.Read(buf[:])
 }
 
 func TestServerPanicHandler(t *testing.T) {
 	go gtcp.ListenAndServe(":1981", func(ctx context.Context, conn gtcp.Conn) {
 		panic("gtcp: intentional panic")
 	})
-	doTcpClient(1981, t)
+	connectTcpClient(1981, t)
 }
 
 func TestServerWithLimitter(t *testing.T) {
@@ -772,9 +773,42 @@ func TestServerWithLimitter(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
-			doTcpClient(1982, t)
+			connectTcpClient(1982, t)
 			wg.Done()
 		}()
 	}
 	wg.Wait()
+}
+
+func TestServerForceClose(t *testing.T) {
+	srv := gtcp.Server{
+		Addr: ":1983",
+		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
+			defer conn.Close()
+			select {
+			case <-time.After(time.Second):
+				t.Errorf("gtcp_test: unexpected timeout happen")
+			case <-ctx.Done():
+			}
+		},
+		ConnTracker: &gtcp.WGConnTracker{},
+	}
+	var err error
+	go func() {
+		err = srv.ListenAndServe()
+	}()
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			connectTcpClient(1983, t)
+			wg.Done()
+		}()
+	}
+	time.Sleep(4 * time.Millisecond)
+	srv.Close()
+	wg.Wait()
+	if err != gtcp.ErrServerClosed {
+		t.Errorf("gtcp_test: err: %+v\n", err)
+	}
 }
