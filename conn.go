@@ -3,6 +3,7 @@ package gtcp
 import (
 	"bufio"
 	"context"
+	"errors"
 	"log"
 	"net"
 	"sync"
@@ -26,6 +27,8 @@ type (
 		net.Conn
 		CancelFunc context.CancelFunc
 		idle       atomicBool
+		hasByte    bool
+		byteBuf    [1]byte
 	}
 
 	BufferedConn struct {
@@ -49,6 +52,10 @@ type (
 )
 
 var (
+	ErrBufferFull = errors.New("gtcp: buffer full")
+)
+
+var (
 	readerPool sync.Pool
 	writerPool sync.Pool
 )
@@ -64,6 +71,11 @@ func NewBaseConn(conn net.Conn) Conn {
 }
 
 func (bc *baseConn) Read(buf []byte) (n int, err error) {
+	if bc.hasByte {
+		buf[0] = bc.byteBuf[0]
+		bc.hasByte = false
+		return 1, nil
+	}
 	n, err = bc.Conn.Read(buf)
 	if err != nil && bc.CancelFunc != nil {
 		bc.CancelFunc()
@@ -103,9 +115,23 @@ func (bc *baseConn) IsIdle() bool {
 	return bc.idle.isSet()
 }
 
-func (bc *baseConn) Peek(int) ([]byte, error) {
-	// @todo emulate by Read
-	panic("gtcp: Peek not implemented")
+func (bc *baseConn) Peek(n int) (buf []byte, err error) {
+	if n > 1 {
+		err = ErrBufferFull
+	}
+	if bc.hasByte {
+		return bc.byteBuf[:], err
+	} else {
+		rn, rerr := bc.Conn.Read(bc.byteBuf[:])
+		if rn == 1 {
+			bc.hasByte = true
+			buf = bc.byteBuf[:]
+		}
+		if rerr != nil {
+			err = rerr // override
+		}
+		return
+	}
 }
 
 func NewBufferedConn(conn Conn) Conn {

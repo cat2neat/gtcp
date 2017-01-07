@@ -148,16 +148,35 @@ func TestBaseConn(t *testing.T) {
 	if in != 0 || out != 0 {
 		t.Errorf("gtcp_test: BaseConn.Stats expected: 0, 0 actual: %d, %d\n", in, out)
 	}
-	// panic
-	c := make(chan struct{})
-	go func() {
-		defer func() {
-			recover()
-			c <- struct{}{}
-		}()
-		bc.Peek(1)
-	}()
-	<-c
+	// peek related
+	dc.ReadFunc = func(buf []byte) (int, error) {
+		copy(buf, smashingStr[:len(buf)])
+		return len(buf), nil
+	}
+	pbuf, err := bc.Peek(1)
+	if len(pbuf) != 1 || err != nil {
+		t.Errorf("gtcp_test: BaseConn.Peek expected: 1, nil actual: %d, %+v\n", len(pbuf), err)
+	}
+	pbuf, err = bc.Peek(2)
+	if len(pbuf) != 1 || err != gtcp.ErrBufferFull {
+		t.Errorf("gtcp_test: BaseConn.Peek expected: 1, %+v actual: %d, %+v\n", gtcp.ErrBufferFull, len(pbuf), err)
+	}
+	n, err = bc.Read(buf)
+	if n != 1 || err != nil {
+		t.Errorf("gtcp_test: BaseConn.Read expected: 1,nil actual: %d, %+v\n", n, err)
+	}
+	n, err = bc.Read(buf)
+	if n != 4 || err != nil {
+		t.Errorf("gtcp_test: BaseConn.Read expected: 4,nil actual: %d, %+v\n", n, err)
+	}
+	dc.ReadFunc = func(buf []byte) (int, error) {
+		return 0, errTest
+	}
+	pbuf, err = bc.Peek(4)
+	if pbuf != nil || err != errTest {
+		t.Errorf("gtcp_test: BaseConn.Peek expected: nil, errTest actual: %+v, %+v\n", pbuf, err)
+	}
+	// others
 	bc.Flush()
 	err = bc.Close()
 	if err != nil {
@@ -557,10 +576,10 @@ func TestSetKeepAliveHandler(t *testing.T) {
 	t.Parallel()
 	dc := &debugNetConn{}
 	dc.ReadFunc = func(buf []byte) (int, error) {
-		copy(buf, smashingStr)
-		return len(smashingStr), nil
+		copy(buf, smashingStr[:len(buf)])
+		return len(buf), nil
 	}
-	c := gtcp.NewBufferedConn(gtcp.NewBaseConn(dc))
+	c := gtcp.NewBaseConn(dc)
 	srv := gtcp.Server{Logger: gtcp.DefaultLogger}
 	first := true
 	srv.SetKeepAliveHandler(time.Millisecond, func(conn gtcp.Conn) error {
@@ -568,10 +587,9 @@ func TestSetKeepAliveHandler(t *testing.T) {
 			first = false
 			return nil
 		} else {
-			// Get the buffer in BufferedConn empty
-			buf := make([]byte, len(smashingStr))
-			conn.Read(buf)
-			// Get the second Peek failed
+			// consume buffer
+			var bb [1]byte
+			c.Read(bb[:])
 			dc.ReadFunc = func(buf []byte) (int, error) {
 				return 0, errTest
 			}
