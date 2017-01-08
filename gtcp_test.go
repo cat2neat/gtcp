@@ -662,6 +662,51 @@ func TestSetPipelineHandler(t *testing.T) {
 const bufSize = 1024
 
 func echoServer() *gtcp.Server {
+	srv := &gtcp.Server{
+		Addr: ":0",
+		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
+			buf := make([]byte, bufSize)
+			for {
+				n, err := conn.Read(buf)
+				if err != nil {
+					return
+				}
+				conn.Write(buf[:n])
+				err = conn.Flush()
+				if err != nil {
+					return
+				}
+			}
+		},
+	}
+	return srv
+}
+
+func echoServerKeepAlive() *gtcp.Server {
+	srv := &gtcp.Server{
+		Addr: ":0",
+	}
+	srv.SetKeepAliveHandler(5*time.Millisecond,
+		func(conn gtcp.Conn) error {
+			buf := make([]byte, bufSize)
+			n, err := conn.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					srv.Logger.Errorf("gtcp_test: err: %+v\n", err)
+				}
+				return err
+			}
+			conn.Write(buf[:n])
+			err = conn.Flush()
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	return srv
+}
+
+func echoServerPipeline() *gtcp.Server {
 	srv := &gtcp.Server{Addr: ":0"}
 	srv.SetPipelineHandler(32,
 		func(r io.Reader) ([]byte, error) {
@@ -726,7 +771,7 @@ func TestServer(t *testing.T) {
 		"bar",
 		"buzz",
 	}
-	time.Sleep(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	var wg sync.WaitGroup
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
@@ -775,7 +820,7 @@ func TestServerPanicHandler(t *testing.T) {
 	}
 	go srv.ListenAndServe()
 	defer srv.Shutdown(context.Background())
-	time.Sleep(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	connectTcpClient(srv.ListenerAddr().String(), t)
 }
 
@@ -783,14 +828,14 @@ func TestServerWithLimitter(t *testing.T) {
 	srv := gtcp.Server{
 		Addr: ":0",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
-			time.Sleep(2 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 		},
 		ConnTracker: &gtcp.WGConnTracker{},
 		Limiters:    append([]gtcp.Limiter(nil), &gtcp.MaxConnLimiter{Max: 2}),
 	}
 	go srv.ListenAndServe()
 	defer srv.Shutdown(context.Background())
-	time.Sleep(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -823,7 +868,7 @@ func TestServerForceClose(t *testing.T) {
 	go func() {
 		err = srv.ListenAndServe()
 	}()
-	time.Sleep(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
@@ -832,7 +877,7 @@ func TestServerForceClose(t *testing.T) {
 			wg.Done()
 		}()
 	}
-	time.Sleep(4 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	srv.Close()
 	wg.Wait()
 	if err != gtcp.ErrServerClosed {
@@ -840,8 +885,27 @@ func TestServerForceClose(t *testing.T) {
 	}
 }
 
-func BenchmarkServerPipeline(b *testing.B) {
+func BenchmarkRawEchoServer(b *testing.B) {
+	srv := &rawEchoServer{}
+	benchEchoServer(srv, b)
+}
+
+func BenchmarkEchoServer(b *testing.B) {
 	srv := echoServer()
+	benchEchoServer(srv, b)
+}
+
+func BenchmarkEchoServerPipeline(b *testing.B) {
+	srv := echoServerPipeline()
+	benchEchoServer(srv, b)
+}
+
+func BenchmarkEchoServerKeepAlive(b *testing.B) {
+	srv := echoServerKeepAlive()
+	benchEchoServer(srv, b)
+}
+
+func benchEchoServer(srv echoer, b *testing.B) {
 	errChan := make(chan error)
 	go func() {
 		errChan <- srv.ListenAndServe()
@@ -870,5 +934,56 @@ func BenchmarkServerPipeline(b *testing.B) {
 			}()
 		}
 		wg.Wait()
+	}
+}
+
+type echoer interface {
+	Close() error
+	ListenerAddr() net.Addr
+	ListenAndServe() error
+}
+
+type rawEchoServer struct {
+	*net.TCPListener
+}
+
+func (s *rawEchoServer) Close() error {
+	return s.TCPListener.Close()
+}
+
+func (s *rawEchoServer) ListenerAddr() net.Addr {
+	if s.TCPListener != nil {
+		return s.TCPListener.Addr()
+	}
+	return nil
+}
+
+func (s *rawEchoServer) ListenAndServe() error {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return err
+	}
+	s.TCPListener = ln.(*net.TCPListener)
+	for {
+		conn, err := s.TCPListener.AcceptTCP()
+		if err != nil {
+			return err
+		}
+		conn.SetKeepAlive(true)
+		conn.SetKeepAlivePeriod(3 * time.Minute)
+		go func() {
+			defer conn.Close()
+			buf := make([]byte, bufSize)
+			for {
+				n, err := conn.Read(buf)
+				if err != nil {
+					return
+				}
+				_, err = conn.Write(buf[:n])
+				if err != nil {
+					return
+				}
+			}
+		}()
 	}
 }
