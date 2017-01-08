@@ -29,6 +29,7 @@ type (
 		idle       atomicBool
 		hasByte    bool
 		byteBuf    [1]byte
+		mu         sync.Mutex // guard Close invoked from multiple goroutines
 	}
 
 	BufferedConn struct {
@@ -58,6 +59,7 @@ var (
 var (
 	readerPool sync.Pool
 	writerPool sync.Pool
+	basePool   sync.Pool
 )
 
 func (b *atomicBool) isSet() bool { return atomic.LoadInt32((*int32)(b)) != 0 }
@@ -65,8 +67,14 @@ func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
 func (b *atomicBool) setFalse()   { atomic.StoreInt32((*int32)(b), 0) }
 
 func NewBaseConn(conn net.Conn) Conn {
-	return &baseConn{
-		Conn: conn,
+	if v := basePool.Get(); v != nil {
+		bc := v.(*baseConn)
+		bc.Conn = conn
+		return bc
+	} else {
+		return &baseConn{
+			Conn: conn,
+		}
 	}
 }
 
@@ -132,6 +140,18 @@ func (bc *baseConn) Peek(n int) (buf []byte, err error) {
 		}
 		return
 	}
+}
+
+func (bc *baseConn) Close() (err error) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if bc.Conn == nil {
+		return
+	}
+	err = bc.Conn.Close()
+	bc.Conn = nil
+	basePool.Put(bc)
+	return
 }
 
 func NewBufferedConn(conn Conn) Conn {

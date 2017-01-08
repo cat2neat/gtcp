@@ -182,6 +182,9 @@ func TestBaseConn(t *testing.T) {
 	if err != nil {
 		t.Errorf("gtcp_test: BaseConn.Close expected: nil actual: %+v\n", err)
 	}
+	bc.Close()
+	bc = gtcp.NewBaseConn(dc)
+	bc.Close()
 }
 
 func TestBufferedConn(t *testing.T) {
@@ -219,6 +222,7 @@ func TestBufferedConn(t *testing.T) {
 		t.Errorf("gtcp_test: BufferedConn.Flush expected: nil actual: %+v\n", err)
 	}
 	err = bufc.Close()
+	bc = gtcp.NewBaseConn(dc)
 	bufc = gtcp.NewBufferedConn(bc) // whether bufio reused can be confirmed by coverage
 	buf, err = bufc.Peek(2)
 	if len(buf) != 2 || string(buf) != smashingStr[:2] || err != nil {
@@ -233,6 +237,7 @@ func TestBufferedConn(t *testing.T) {
 	dc.WriteFunc = func(buf []byte) (int, error) {
 		return 0, errTest
 	}
+	bc = gtcp.NewBaseConn(dc)
 	bufc = gtcp.NewBufferedConn(bc)
 	n, err = bufc.Write([]byte(smashingStr))
 	if err != nil {
@@ -776,7 +781,6 @@ func TestServerWithLimitter(t *testing.T) {
 		Addr: ":1982",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
 			time.Sleep(2 * time.Millisecond)
-			conn.Close()
 		},
 		ConnTracker: &gtcp.WGConnTracker{},
 		Limiters:    append([]gtcp.Limiter(nil), &gtcp.MaxConnLimiter{Max: 2}),
@@ -798,7 +802,6 @@ func TestServerForceClose(t *testing.T) {
 	srv := gtcp.Server{
 		Addr: ":1983",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
-			defer conn.Close()
 			select {
 			case <-time.After(time.Second):
 				t.Errorf("gtcp_test: unexpected timeout happen")
