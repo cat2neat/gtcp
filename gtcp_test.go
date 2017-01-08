@@ -662,7 +662,7 @@ func TestSetPipelineHandler(t *testing.T) {
 const bufSize = 1024
 
 func echoServer() *gtcp.Server {
-	srv := &gtcp.Server{}
+	srv := &gtcp.Server{Addr: ":0"}
 	srv.SetPipelineHandler(32,
 		func(r io.Reader) ([]byte, error) {
 			buf := make([]byte, bufSize)
@@ -675,17 +675,14 @@ func echoServer() *gtcp.Server {
 	return srv
 }
 
-func doEchoClient(src []string, t testing.TB) {
-	addr := &net.TCPAddr{
-		IP:   net.ParseIP("localhost"),
-		Port: smashingInt,
-	}
-	conn, err := net.DialTCP("tcp", nil, addr)
+func doEchoClient(addr string, src []string, t testing.TB) {
+	raw, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Errorf("gtcp_test: err: %+v\n", err)
 		return
 	}
-	defer conn.Close()
+	defer raw.Close()
+	conn := raw.(*net.TCPConn)
 	for _, s := range src {
 		n, err := conn.Write([]byte(s))
 		if n != len(s) || err != nil {
@@ -719,34 +716,36 @@ func doEchoClient(src []string, t testing.TB) {
 	}
 }
 
-/*func TestServer(t *testing.T) {*/
-//// echo:server
-//srv := echoServer()
-//go srv.ListenAndServe()
-//// echo:client
-//data := []string{
-//"foo",
-//"bar",
-//"buzz",
-//}
-//var wg sync.WaitGroup
-//for i := 0; i < 32; i++ {
-//wg.Add(1)
-//go func() {
-//doEchoClient(data, t)
-//wg.Done()
-//}()
-//}
-//wg.Wait()
-//// should fail due to port collision
-//err := srv.ListenAndServe()
-//if err == nil {
-//t.Errorf("gtcp_test: ListenAndServe should fail due to port collision\n")
-//}
-//srv.Shutdown(context.Background())
-//// safe to double close
-//srv.Close()
-/*}*/
+func TestServer(t *testing.T) {
+	// echo:server
+	srv := echoServer()
+	go srv.ListenAndServe()
+	// echo:client
+	data := []string{
+		"foo",
+		"bar",
+		"buzz",
+	}
+	time.Sleep(time.Millisecond)
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			doEchoClient(srv.ListenerAddr().String(), data, t)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	// should fail due to port collision
+	srv.Addr = srv.ListenerAddr().String()
+	err := srv.ListenAndServe()
+	if err == nil {
+		t.Errorf("gtcp_test: ListenAndServe should fail due to port collision\n")
+	}
+	srv.Shutdown(context.Background())
+	// safe to double close
+	srv.Close()
+}
 
 func TestServerNilHandler(t *testing.T) {
 	defer func() {
@@ -754,16 +753,11 @@ func TestServerNilHandler(t *testing.T) {
 			t.Errorf("gtcp_test: Nil handler should cause panic\n")
 		}
 	}()
-	gtcp.ListenAndServe(":1980", nil)
+	gtcp.ListenAndServe(":0", nil)
 }
 
-func connectTcpClient(port int, t *testing.T) {
-	addr := &net.TCPAddr{
-		IP:   net.ParseIP("localhost"),
-		Port: port,
-	}
-	time.Sleep(time.Millisecond)
-	conn, err := net.DialTCP("tcp", nil, addr)
+func connectTcpClient(addr string, t *testing.T) {
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("gtcp_test: err: %+v\n", err)
 	}
@@ -773,15 +767,21 @@ func connectTcpClient(port int, t *testing.T) {
 }
 
 func TestServerPanicHandler(t *testing.T) {
-	go gtcp.ListenAndServe(":1981", func(ctx context.Context, conn gtcp.Conn) {
-		panic(gtcp.ErrAbortHandler)
-	})
-	connectTcpClient(1981, t)
+	srv := gtcp.Server{
+		Addr: ":0",
+		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
+			panic(gtcp.ErrAbortHandler)
+		},
+	}
+	go srv.ListenAndServe()
+	defer srv.Shutdown(context.Background())
+	time.Sleep(time.Millisecond)
+	connectTcpClient(srv.ListenerAddr().String(), t)
 }
 
 func TestServerWithLimitter(t *testing.T) {
 	srv := gtcp.Server{
-		Addr: ":1982",
+		Addr: ":0",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
 			time.Sleep(2 * time.Millisecond)
 		},
@@ -790,11 +790,12 @@ func TestServerWithLimitter(t *testing.T) {
 	}
 	go srv.ListenAndServe()
 	defer srv.Shutdown(context.Background())
+	time.Sleep(time.Millisecond)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
-			connectTcpClient(1982, t)
+			connectTcpClient(srv.ListenerAddr().String(), t)
 			wg.Done()
 		}()
 	}
@@ -803,7 +804,7 @@ func TestServerWithLimitter(t *testing.T) {
 
 func TestServerForceClose(t *testing.T) {
 	srv := gtcp.Server{
-		Addr: ":1983",
+		Addr: ":0",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
 			select {
 			case <-time.After(time.Second):
@@ -812,16 +813,22 @@ func TestServerForceClose(t *testing.T) {
 			}
 		},
 		ConnTracker: &gtcp.WGConnTracker{},
+		NewConn:     gtcp.NewBufferedConn,
+	}
+	addr := srv.ListenerAddr()
+	if addr != nil {
+		t.Errorf("gtcp_test: expected: nil actual:%+v\n", addr)
 	}
 	var err error
 	go func() {
 		err = srv.ListenAndServe()
 	}()
+	time.Sleep(time.Millisecond)
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
-			connectTcpClient(1983, t)
+			connectTcpClient(srv.ListenerAddr().String(), t)
 			wg.Done()
 		}()
 	}
@@ -858,7 +865,7 @@ func BenchmarkServerPipeline(b *testing.B) {
 		for i := 0; i < 8; i++ {
 			wg.Add(1)
 			go func() {
-				doEchoClient(data, b)
+				doEchoClient(srv.ListenerAddr().String(), data, b)
 				wg.Done()
 			}()
 		}

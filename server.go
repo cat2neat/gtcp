@@ -102,6 +102,13 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 	return
 }
 
+func (s *Server) ListenerAddr() net.Addr {
+	if s.listener != nil {
+		return s.listener.Addr()
+	}
+	return nil
+}
+
 func (s *Server) ListenAndServe() error {
 	addr := s.Addr
 	if addr == "" {
