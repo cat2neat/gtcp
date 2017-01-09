@@ -101,10 +101,9 @@ func NewBaseConn(conn net.Conn) Conn {
 		bc := v.(*baseConn)
 		bc.Conn = conn
 		return bc
-	} else {
-		return &baseConn{
-			Conn: conn,
-		}
+	}
+	return &baseConn{
+		Conn: conn,
 	}
 }
 
@@ -159,17 +158,16 @@ func (bc *baseConn) Peek(n int) (buf []byte, err error) {
 	}
 	if bc.hasByte {
 		return bc.byteBuf[:], err
-	} else {
-		rn, rerr := bc.Conn.Read(bc.byteBuf[:])
-		if rn == 1 {
-			bc.hasByte = true
-			buf = bc.byteBuf[:]
-		}
-		if rerr != nil {
-			err = rerr // override
-		}
-		return
 	}
+	rn, rerr := bc.Conn.Read(bc.byteBuf[:])
+	if rn == 1 {
+		bc.hasByte = true
+		buf = bc.byteBuf[:]
+	}
+	if rerr != nil {
+		err = rerr // override
+	}
+	return
 }
 
 func (bc *baseConn) Close() (err error) {
@@ -300,7 +298,7 @@ func (d *DebugConn) Write(buf []byte) (n int, err error) {
 	return
 }
 
-// Closes closes the internal Conn.
+// Close closes the internal Conn.
 // It also outputs debug information before/after calling internal Conn.Close().
 func (d *DebugConn) Close() (err error) {
 	log.Printf("Close() = ...")

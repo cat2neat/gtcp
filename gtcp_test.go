@@ -591,15 +591,14 @@ func TestSetKeepAliveHandler(t *testing.T) {
 		if first {
 			first = false
 			return nil
-		} else {
-			// consume buffer
-			var bb [1]byte
-			c.Read(bb[:])
-			dc.ReadFunc = func(buf []byte) (int, error) {
-				return 0, errTest
-			}
-			return nil
 		}
+		// consume buffer
+		var bb [1]byte
+		c.Read(bb[:])
+		dc.ReadFunc = func(buf []byte) (int, error) {
+			return 0, errTest
+		}
+		return nil
 	})
 	srv.ConnHandler(context.Background(), c)
 	srv.SetKeepAliveHandler(time.Millisecond, func(conn gtcp.Conn) error {
@@ -629,16 +628,14 @@ func TestSetPipelineHandler(t *testing.T) {
 			buf := make([]byte, len(smashingStr))
 			r.Read(buf)
 			return buf, nil
-		} else {
-			return nil, errTest
 		}
+		return nil, errTest
 	}, func(buf []byte, wf gtcp.WriteFlusher) error {
 		new := atomic.AddUint32(&cnt, 1)
 		if new%2 == 0 {
 			return nil
-		} else {
-			return errTest
 		}
+		return errTest
 	})
 	srv.ConnHandler(context.Background(), c)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -801,7 +798,7 @@ func TestServerNilHandler(t *testing.T) {
 	gtcp.ListenAndServe(":0", nil)
 }
 
-func connectTcpClient(addr string, t *testing.T) {
+func connectTCPClient(addr string, t *testing.T) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("gtcp_test: err: %+v\n", err)
@@ -821,7 +818,7 @@ func TestServerPanicHandler(t *testing.T) {
 	go srv.ListenAndServe()
 	defer srv.Shutdown(context.Background())
 	time.Sleep(5 * time.Millisecond)
-	connectTcpClient(srv.ListenerAddr().String(), t)
+	connectTCPClient(srv.ListenerAddr().String(), t)
 }
 
 func TestServerWithLimitter(t *testing.T) {
@@ -840,7 +837,7 @@ func TestServerWithLimitter(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
-			connectTcpClient(srv.ListenerAddr().String(), t)
+			connectTCPClient(srv.ListenerAddr().String(), t)
 			wg.Done()
 		}()
 	}
@@ -873,7 +870,7 @@ func TestServerForceClose(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
-			connectTcpClient(srv.ListenerAddr().String(), t)
+			connectTCPClient(srv.ListenerAddr().String(), t)
 			wg.Done()
 		}()
 	}

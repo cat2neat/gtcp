@@ -224,13 +224,13 @@ func (s *Server) Serve(l net.Listener) error {
 				delay := s.Retry.Backoff(retry)
 				s.Logger.Errorf("gtcp: Accept error: %v; retrying in %v", e, delay)
 				time.Sleep(delay)
-				retry += 1
+				retry++
 				continue
 			}
 			return e
 		}
 		retry = 0
-		var conn Conn = NewBaseConn(rw)
+		conn := NewBaseConn(rw)
 		if s.NewConn != nil {
 			conn = s.NewConn(conn)
 		}
