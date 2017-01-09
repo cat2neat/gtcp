@@ -1,27 +1,3 @@
-// Goals:
-// - can be used in the same manner with http.Server
-//   - Make API as much compatible as possible
-//   - Make the zero value useful
-// - inherit as much battle tested code from net/http
-// - much flexiblity with built-in components
-//   - ConnHandler
-//     - Raw
-//     - KeepAliveHandler
-//     - PipelineHandler
-//   - ConnTracker
-//     - MapConnTracker(same with net/http
-//     - WGConnTracker(fast, less memory than Map*
-//   - NewConn (BufferedConn, StatsConn, DebugConn
-//     - can be layered
-//   - Logger
-//   - Retry
-//   - Statistics (# of connections, in bytes, out bytes
-//   - Limiter (Connection, IP
-// - Get GC pressure as little as possible with sync.Pool
-// - Zero 3rd party depentencies
-// TODO:
-// - tls
-// - multiple listeners
 package gtcp
 
 import (
@@ -34,18 +10,64 @@ import (
 )
 
 type (
+	// Server defines parameters for running a gtcp server.
+	// The zero value for Server is a valid configuration.
 	Server struct {
+		// Addr to listen on, ":1979" if empty.
 		Addr string
 
+		// ConnHandler handles a tcp connection accepted.
+		// It can be used not only directly setting ConnHandler but
+		// - Server.SetKeepAliveHandler
+		// - Server.SetPipelineHandler
+		// Panic occurred if empty.
 		ConnHandler ConnHandler
 
 		// Configurable components
-		NewConn     NewConn
+
+		// NewConn that applied to each tcp connection accepted by listener.
+		// It can be
+		// - gtcp.NewBufferedConn
+		// - gtcp.NewStatsConn
+		// - gtcp.NewDebugConn
+		// also can be layered like the below.
+		//		func(conn Conn) Conn {
+		//			return gtcp.NewBufferedConn(gtcp.NewStatsConn(conn))
+		//		}
+		// None NewConn is applied if empty.
+		NewConn NewConn
+
+		// ConnTracker that handles active connections.
+		// It can be
+		// - gtcp.MapConnTracker
+		// - gtcp.WGConnTracker
+		// gtcp.MapConnTracker is set if empty.
 		ConnTracker ConnTracker
-		Logger      Logger
-		Retry       Retry
-		Limiters    []Limiter
-		Statistics  Statistics
+
+		// Logger that logs if an error occurred in gtcp.
+		// It can be
+		// - gtcp.BuiltinLogger
+		// gtcp.DefaultLogger is set if empty.
+		Logger Logger
+
+		// Retry that handles the retry interval when Accept on listner failed.
+		// It can be
+		// - gtcp.ExponentialRetry
+		// gtcp.DefaultRetry is set if empty.(it behaves in the same manner with net/http/Server.
+		Retry Retry
+
+		// Limiters that limits connections.
+		// It can be
+		// - gtcp.MaxConnLimiter
+		// also multiple limiters can be set.
+		// None Limiter is set if empty.
+		Limiters []Limiter
+
+		// Statistics that measures some statistics.
+		// It can be
+		// - gtcp.TrafficStatistics
+		// gtcp.TrafficStatistics is set if empty.
+		Statistics Statistics
 
 		listener net.Listener
 
@@ -55,7 +77,11 @@ type (
 )
 
 var (
+	// ErrServerClosed returned when listener got closed through Close/Shutdown.
 	ErrServerClosed = errors.New("gtcp: Server closed")
+	// ErrAbortHandler is a sentinel panic value to abort a handler.
+	// panicking with ErrAbortHandler also suppresses logging of a stack
+	// trace to the server's error log.
 	ErrAbortHandler = errors.New("gtcp: abort Handler")
 )
 
@@ -84,6 +110,9 @@ func (s *Server) closeDoneChanLocked() {
 	}
 }
 
+// Close immediately closes the listner and any
+// connections tracked by ConnTracker.
+// Close returns any error returned from closing the listner.
 func (s *Server) Close() (err error) {
 	s.mu.Lock()
 	s.closeDoneChanLocked()
@@ -93,6 +122,10 @@ func (s *Server) Close() (err error) {
 	return
 }
 
+// Shutdown gracefully shuts down the server without interrupting any
+// active connections.
+// If the provided context expires before the shutdown is complete,
+// then the context's error is returned.
 func (s *Server) Shutdown(ctx context.Context) (err error) {
 	s.mu.Lock()
 	s.closeDoneChanLocked()
@@ -102,6 +135,7 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 	return
 }
 
+// ListenerAddr returns the listner.Addr() or nil if listner is empty.
 func (s *Server) ListenerAddr() net.Addr {
 	if s.listener != nil {
 		return s.listener.Addr()
@@ -109,6 +143,10 @@ func (s *Server) ListenerAddr() net.Addr {
 	return nil
 }
 
+// ListenAndServe listens on the TCP network address Addr and then
+// calls Serve to handle requests on incoming connections.
+// If Addr is blank, ":1979" is used.
+// ListenAndServe always returns a non-nil error.
 func (s *Server) ListenAndServe() error {
 	addr := s.Addr
 	if addr == "" {
@@ -135,11 +173,17 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	return tc, nil
 }
 
+// ListenAndServe listens on the TCP network address addr and then
+// calls Serve to handle requests on incoming connections.
+// ListenAndServe always returns a non-nil error.
 func ListenAndServe(addr string, handler ConnHandler) error {
 	server := &Server{Addr: addr, ConnHandler: handler}
 	return server.ListenAndServe()
 }
 
+// Serve accepts incoming connections on the Listener l, creating a
+// new service goroutine for each.
+// The service goroutines call ConnHandler to reply to them.
 func (s *Server) Serve(l net.Listener) error {
 	var retry uint64
 	defer l.Close()
