@@ -8,16 +8,41 @@ import (
 )
 
 type (
+	// WriteFlusher is the interface that wraps write operations on Conn.
 	WriteFlusher interface {
 		io.Writer
+		// Flush writes any buffered data to the underlying Conn.
 		Flush() error
 	}
-	ConnHandler    func(context.Context, Conn)
-	ReqHandler     func(Conn) error
+
+	// ConnHandler is the callback function called when Conn gets ready to communicate with peer.
+	// You can use ConnHandler to gain full control on socket.
+	ConnHandler func(context.Context, Conn)
+
+	// ReqHandler is the callback function used with SetKeepAliveHandler.
+	// It's called when Conn gets ready to communicate specifically
+	// - accepted by listener
+	// - receiving one more byte while being in keepalive
+	// You can use ReqHandler with SetKeepAliveHandler to implement keepalive easily.
+	ReqHandler func(Conn) error
+
+	// PipelineReader is the callback function used with SetPipelineHandler.
+	// SetPipelineHandler enables to implement protocol pipelining easily.
+	// It's used for reading part of pipelining and dispatch meaningful []byte to
+	// PipelineWriter via return value.
 	PipelineReader func(io.Reader) ([]byte, error)
+
+	// PipelineWriter is the callback function used with SetPipelineHandler.
+	// SetPipelineHandler enables to implement protocol pipelining easily.
+	// It's used for writing part of pipelining and
+	// called when receiving a meaningful []byte from PipelineReader.
 	PipelineWriter func([]byte, WriteFlusher) error
 )
 
+// SetKeepAliveHandler enables to implement keepalive easily.
+// It call h and call again repeatedly if receiving one more byte while waiting idle time
+// or stop communicating.
+// It also stop when detecting listener got closed.
 func (s *Server) SetKeepAliveHandler(idle time.Duration, h ReqHandler) {
 	s.ConnHandler = func(ctx context.Context, conn Conn) {
 		for {
@@ -43,6 +68,12 @@ func (s *Server) SetKeepAliveHandler(idle time.Duration, h ReqHandler) {
 	}
 }
 
+// SetPipelineHandler enables to implement protocol pipelining easily.
+// It combines pr and pw with a buffered channel that has numBuf.
+// pr need to implement reading part of pipelining and dispatch meaningful []byte to pw.
+// pw need to implement writing part of pipelining.
+// It stops if pr returns nil buf or any error.
+// It also stop when detecting listener got closed.
 func (s *Server) SetPipelineHandler(
 	numBuf int,
 	pr PipelineReader,
