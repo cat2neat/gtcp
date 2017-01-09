@@ -11,16 +11,38 @@ import (
 )
 
 type (
+	// Conn is the interface that wraps connetcion specific operations
+	// in addition to net.Conn.
 	Conn interface {
 		net.Conn
+		// Flush writes any buffered data to the underlying net.Conn.
 		Flush() error
+
+		// SetCancelFunc sets context.CancelFunc that called automatically
+		// when Read/Write failed.
 		SetCancelFunc(context.CancelFunc)
+
+		// Stats returns in/out bytes gone through this Conn.
 		Stats() (int64, int64)
+
+		// SetIdle sets whether this Conn is idle or not.
+		// It's used to realize gtcp.Server.Shutdown.
 		SetIdle(bool)
+
+		// IsIdle returns whether this Conn is idle or not.
+		// It's used to realize gtcp.Server.Shutdown.
 		IsIdle() bool
+
+		// Peek returns the next n bytes without advancing the reader.
 		Peek(int) ([]byte, error)
 	}
 
+	// NewConn is the function that takes a Conn and returns another Conn
+	// that enables to generate multi layered Conn.
+	// ex)
+	//		func(conn Conn) Conn {
+	//			return gtcp.NewBufferedConn(gtcp.NewStatsConn(conn))
+	//		}
 	NewConn func(Conn) Conn
 
 	baseConn struct {
@@ -32,6 +54,7 @@ type (
 		mu         sync.Mutex // guard Close invoked from multiple goroutines
 	}
 
+	// BufferedConn implements Conn that wraps Conn in bufio.Reader|Writer.
 	BufferedConn struct {
 		Conn
 		bufr *bufio.Reader
@@ -39,12 +62,16 @@ type (
 		once sync.Once
 	}
 
+	// StatsConn implements Conn that holds in/out bytes.
 	StatsConn struct {
 		Conn
-		InBytes  int64
+		// InBytes stores incomming bytes.
+		InBytes int64
+		// OutBytes stores outgoing bytes.
 		OutBytes int64
 	}
 
+	// DebugConn implements Conn that logs every Read/Write/Close operations using standard log.
 	DebugConn struct {
 		Conn
 	}
@@ -53,6 +80,7 @@ type (
 )
 
 var (
+	// ErrBufferFull returned when Peek takes a larger value than its buffer.
 	ErrBufferFull = errors.New("gtcp: buffer full")
 )
 
@@ -66,6 +94,8 @@ func (b *atomicBool) isSet() bool { return atomic.LoadInt32((*int32)(b)) != 0 }
 func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
 func (b *atomicBool) setFalse()   { atomic.StoreInt32((*int32)(b), 0) }
 
+// NewBaseConn takes net.Conn and returns Conn that wraps net.Conn.
+// It's exported only for test purpose.
 func NewBaseConn(conn net.Conn) Conn {
 	if v := basePool.Get(); v != nil {
 		bc := v.(*baseConn)
@@ -154,6 +184,7 @@ func (bc *baseConn) Close() (err error) {
 	return
 }
 
+// NewBufferedConn returns Conn wraps a given Conn in bufio.Reader|Writer.
 func NewBufferedConn(conn Conn) Conn {
 	var br *bufio.Reader
 	var bw *bufio.Writer
@@ -176,16 +207,23 @@ func NewBufferedConn(conn Conn) Conn {
 	}
 }
 
+// Read reads data into buf using internal bufio.Reader.
+// It returns the number of bytes read into buf.
 func (b *BufferedConn) Read(buf []byte) (n int, err error) {
 	n, err = b.bufr.Read(buf)
 	return
 }
 
+// Write writes the contents of buf into the internal bufio.Writer.
+// It returns the number of bytes written.
 func (b *BufferedConn) Write(buf []byte) (n int, err error) {
 	n, err = b.bufw.Write(buf)
 	return
 }
 
+// Close closes the internal bufio.Reader|Writer and also Conn.
+// It's protected by sync.Once as multiple goroutines can call
+// especially in case using gtcp.Server.Close|Shutdown.
 func (b *BufferedConn) Close() (err error) {
 	b.once.Do(func() {
 		b.bufr.Reset(nil)
@@ -203,38 +241,49 @@ func (b *BufferedConn) Close() (err error) {
 	return
 }
 
+// Flush writes any buffered data to the underlying Conn.
 func (b *BufferedConn) Flush() (err error) {
 	return b.bufw.Flush()
 }
 
+// Peek returns the next n bytes without advancing the reader.
 func (b *BufferedConn) Peek(n int) ([]byte, error) {
 	return b.bufr.Peek(n)
 }
 
+// NewStatsConn returns Conn that holds in/out bytes.
 func NewStatsConn(conn Conn) Conn {
 	return &StatsConn{Conn: conn}
 }
 
+// Read reads data into buf and returns the number of bytes read into buf.
+// It also adds InBytes and bytes read up.
 func (s *StatsConn) Read(buf []byte) (n int, err error) {
 	n, err = s.Conn.Read(buf)
 	s.InBytes += int64(n)
 	return
 }
 
+// Write writes the contents of buf and returns the number of bytes written.
+// It also adds OutBytes and bytes written up.
 func (s *StatsConn) Write(buf []byte) (n int, err error) {
 	n, err = s.Conn.Write(buf)
 	s.OutBytes += int64(n)
 	return
 }
 
+// Stats returns in/out bytes gone through this Conn.
 func (s *StatsConn) Stats() (int64, int64) {
 	return s.InBytes, s.OutBytes
 }
 
+// NewDebugConn returns Conn that logs debug information using standard log.
 func NewDebugConn(conn Conn) Conn {
 	return &DebugConn{Conn: conn}
 }
 
+// Read reads data into buf and returns the number of bytes read into buf.
+// It also outputs debug information before/after calling internal Conn.Read.
 func (d *DebugConn) Read(buf []byte) (n int, err error) {
 	log.Printf("Read(%d) = ....", len(buf))
 	n, err = d.Conn.Read(buf)
@@ -242,6 +291,8 @@ func (d *DebugConn) Read(buf []byte) (n int, err error) {
 	return
 }
 
+// Write writes the contents of buf and returns the number of bytes written.
+// It also outputs debug information before/after calling internal Conn.Write.
 func (d *DebugConn) Write(buf []byte) (n int, err error) {
 	log.Printf("Write(%d) = ....", len(buf))
 	n, err = d.Conn.Write(buf)
@@ -249,6 +300,8 @@ func (d *DebugConn) Write(buf []byte) (n int, err error) {
 	return
 }
 
+// Closes closes the internal Conn.
+// It also outputs debug information before/after calling internal Conn.Close().
 func (d *DebugConn) Close() (err error) {
 	log.Printf("Close() = ...")
 	err = d.Conn.Close()
