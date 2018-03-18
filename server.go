@@ -144,10 +144,6 @@ func (s *Server) ListenerAddr() net.Addr {
 	return nil
 }
 
-// ListenAndServeTLS listens on the TCP network address over TLS and then
-// calls Serve to handle requests on incoming connections.
-// If Addr is blank, ":1979" is used.
-// ListenAndServeTLS always returns a non-nil error.
 func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {

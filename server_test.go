@@ -3,7 +3,6 @@ package gtcp_test
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -17,15 +16,14 @@ import (
 const bufSize = 1024
 
 func echoServer() *gtcp.Server {
-	done := false
 	srv := &gtcp.Server{
 		Addr: ":0",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
 			buf := make([]byte, bufSize)
+			done := false
 			for !done {
 				n, err := conn.Read(buf)
 				if err != nil {
-					fmt.Printf("server read: %+v\n", err)
 					done = true
 					if err != io.EOF {
 						return
@@ -37,7 +35,6 @@ func echoServer() *gtcp.Server {
 				conn.Write(buf[:n])
 				err = conn.Flush()
 				if err != nil {
-					fmt.Printf("server flush: %+v\n", err)
 					return
 				}
 			}
@@ -136,7 +133,7 @@ func doEchoClient(addr string, src []string, t testing.TB) {
 	doClientConn(raw, src, closeWrite, t)
 }
 
-func _TestServer(t *testing.T) {
+func TestServer(t *testing.T) {
 	// echo:server
 	srv := echoServer()
 	var err error
@@ -254,7 +251,7 @@ func TestServerPanicHandler(t *testing.T) {
 	connectTCPClient(srv.ListenerAddr().String(), t)
 }
 
-func _TestServerWithLimitter(t *testing.T) {
+func TestServerWithLimitter(t *testing.T) {
 	srv := gtcp.Server{
 		Addr: ":0",
 		ConnHandler: func(ctx context.Context, conn gtcp.Conn) {
