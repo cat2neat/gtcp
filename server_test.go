@@ -133,12 +133,12 @@ func doEchoClient(addr string, src []string, t testing.TB) {
 	doClientConn(raw, src, closeWrite, t)
 }
 
-func TestServer(t *testing.T) {
+func doServer(listen func(*gtcp.Server) error, echoClientFunc func(string, []string, testing.TB), t *testing.T) {
 	// echo:server
 	srv := echoServer()
 	var err error
 	go func() {
-		err = srv.ListenAndServe()
+		err = listen(srv)
 	}()
 
 	time.Sleep(5 * time.Millisecond)
@@ -156,7 +156,7 @@ func TestServer(t *testing.T) {
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
 		go func() {
-			doEchoClient(srv.ListenerAddr().String(), data, t)
+			echoClientFunc(srv.ListenerAddr().String(), data, t)
 			wg.Done()
 		}()
 	}
@@ -170,6 +170,13 @@ func TestServer(t *testing.T) {
 	srv.Shutdown(context.Background())
 	// safe to double close
 	srv.Close()
+}
+
+func TestServer(t *testing.T) {
+	listen := func(svc *gtcp.Server) error {
+		return svc.ListenAndServe()
+	}
+	doServer(listen, doEchoClient, t)
 }
 
 func TestServerNilHandler(t *testing.T) {
@@ -196,36 +203,11 @@ func doEchoClientTLS(addr string, src []string, t testing.TB) {
 }
 
 func TestTLSServer(t *testing.T) {
-	// echo:server
-	srv := echoServer()
-	var err error
-	go func() {
-		err = srv.ListenAndServeTLS("certs/server_cert.pem", "certs/server_key.pem")
-	}()
-
-	time.Sleep(5 * time.Millisecond)
-	if err != nil {
-		t.Fatal("failed to do ListenAndServeTLS", err)
+	listen := func(svc *gtcp.Server) error {
+		return svc.ListenAndServeTLS("certs/server_cert.pem", "certs/server_key.pem")
 	}
 
-	// echo:client
-	data := []string{
-		"foo",
-		"bar",
-		"buzz",
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			doEchoClientTLS(srv.ListenerAddr().String(), data, t)
-			wg.Done()
-		}()
-	}
-	wg.Wait()
-	srv.Shutdown(context.Background())
-	// safe to double close
-	srv.Close()
+	doServer(listen, doEchoClientTLS, t)
 }
 
 func connectTCPClient(addr string, t *testing.T) {
