@@ -163,7 +163,7 @@ func doServer(listen func(*gtcp.Server) error, echoClientFunc func(string, []str
 	wg.Wait()
 	// should fail due to port collision
 	srv.Addr = srv.ListenerAddr().String()
-	err = srv.ListenAndServe()
+	err = listen(srv)
 	if err == nil {
 		t.Errorf("gtcp_test: ListenAndServe should fail due to port collision\n")
 	}
