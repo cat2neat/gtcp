@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -203,8 +205,16 @@ func doEchoClientTLS(addr string, src []string, t testing.TB) {
 }
 
 func TestTLSServer(t *testing.T) {
+	certFile := "server_cert.pem"
+	keyFile := "server_key.pem"
+	if err := createCerts(certFile, keyFile); err != nil {
+		t.Errorf("failed to create cert files", err)
+	}
+
+	defer deleteCerts(certFile, keyFile)
+
 	listen := func(svc *gtcp.Server) error {
-		return svc.ListenAndServeTLS("certs/server_cert.pem", "certs/server_key.pem")
+		return svc.ListenAndServeTLS(certFile, keyFile)
 	}
 
 	doServer(listen, doEchoClientTLS, t)
@@ -395,4 +405,81 @@ func (s *rawEchoServer) ListenAndServe() error {
 			}
 		}()
 	}
+}
+
+const (
+	certData = `-----BEGIN CERTIFICATE-----
+MIIEVDCCAzygAwIBAgIJAJc1TOqaTTUpMA0GCSqGSIb3DQEBBQUAMHkxCzAJBgNV
+BAYTAkNIMQswCQYDVQQIEwJTSDELMAkGA1UEBxMCU0gxDDAKBgNVBAoTA1NQTDEN
+MAsGA1UECxMEU09MTjESMBAGA1UEAxMJbG9jYWxob3N0MR8wHQYJKoZIhvcNAQkB
+FhBrY2hlbkBzcGx1bmsuY29tMB4XDTE2MDUxMTIxNTIwNFoXDTE3MDUxMTIxNTIw
+NFoweTELMAkGA1UEBhMCQ0gxCzAJBgNVBAgTAlNIMQswCQYDVQQHEwJTSDEMMAoG
+A1UEChMDU1BMMQ0wCwYDVQQLEwRTT0xOMRIwEAYDVQQDEwlsb2NhbGhvc3QxHzAd
+BgkqhkiG9w0BCQEWEGtjaGVuQHNwbHVuay5jb20wggEiMA0GCSqGSIb3DQEBAQUA
+A4IBDwAwggEKAoIBAQC2beOk6AGWGzU6iyIlKWEzf/4sUFFc/Ad29RbwhlkSoW1j
++1npnZspM/3VAi2Ll/k3YbNuMaQ1vDChDt9BQO1BD+IFKqO/tLd5+Rrj003r1uKi
+uPYviRMkIGnrr361S4ASZieqedkpi585ijxVx9uY2PjGXFdFU6AxCyLDzQ36A8N+
+Mn1T2zMO9Koem+/0xkFcBhKyvGFmWM/oYfCtupiWK3tmIwnQ+ldh41srsPb+DAQ3
+Pqk7ssEumrgnsG/tkNosgkEbuODtcaTy2NTpuo4h1Lgzbs3yYvqwDhHe8kdijRyz
+NczfucK63Uy0mDqy+t2QF8nZ5AMNWzHyuIegQmanAgMBAAGjgd4wgdswHQYDVR0O
+BBYEFIEMpJ6XYlx5p0LOM6uvlZrcyPT8MIGrBgNVHSMEgaMwgaCAFIEMpJ6XYlx5
+p0LOM6uvlZrcyPT8oX2kezB5MQswCQYDVQQGEwJDSDELMAkGA1UECBMCU0gxCzAJ
+BgNVBAcTAlNIMQwwCgYDVQQKEwNTUEwxDTALBgNVBAsTBFNPTE4xEjAQBgNVBAMT
+CWxvY2FsaG9zdDEfMB0GCSqGSIb3DQEJARYQa2NoZW5Ac3BsdW5rLmNvbYIJAJc1
+TOqaTTUpMAwGA1UdEwQFMAMBAf8wDQYJKoZIhvcNAQEFBQADggEBAKs8n/CIihGw
+nDo8kXOFfzC0+mSWgD2Xz2fCltGXjHn4h5wjD+I2tIos/teUSw6CLZ6kWp3aK3b7
+8tHgTI6Y52Ztt3dvF1PeVPl/3ob7DoVQb4Gmqgv1/0iLxgFekNVrya9HJoW47cpN
+rdLLqXAFc+Ev3rSt9ZsztzNc8e9F+dOsjVmtYsKGLKyfhhY6XMLvwpzptnhzjKLD
+SRMp9uK80LG0nrg5EG7uXQ/KcerrZp4d8TbshOHY67R+9QY1r+q2cZ4PmdPDoTgp
+bnB6lZAP2wDvlmXZp5fwDajsQghhtO4KyzuefJofyaMo6lyufpuIc8jas9pNvuyG
+7w6DJcWUASM=
+-----END CERTIFICATE-----`
+	keyData = `-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEAtm3jpOgBlhs1OosiJSlhM3/+LFBRXPwHdvUW8IZZEqFtY/tZ
+6Z2bKTP91QIti5f5N2GzbjGkNbwwoQ7fQUDtQQ/iBSqjv7S3efka49NN69biorj2
+L4kTJCBp669+tUuAEmYnqnnZKYufOYo8VcfbmNj4xlxXRVOgMQsiw80N+gPDfjJ9
+U9szDvSqHpvv9MZBXAYSsrxhZljP6GHwrbqYlit7ZiMJ0PpXYeNbK7D2/gwENz6p
+O7LBLpq4J7Bv7ZDaLIJBG7jg7XGk8tjU6bqOIdS4M27N8mL6sA4R3vJHYo0cszXM
+37nCut1MtJg6svrdkBfJ2eQDDVsx8riHoEJmpwIDAQABAoIBAGYkRO9SD4FSHo12
+1VllP80r/s4k8klTu4I5W+yz7C9oPu1aEE+jNPru51Jac9HS93CwvVwXY0/K3Jdw
+0kOg7LYfBHfMFf8CWjBq70lcSCaiHCbr1LtszlDN7UBO9GzhpwWmONNUgeinCjGX
+WozU5/k+kpvNm/dvCSQsjfx/VTID8pLhaI6IbCS4m4HM0K0QwYTgjl3uENmnfnsr
+8F6rP4qHS11Rqo0gOVlkHTTkvrM76d7POSmqd8bjPSncdp6dxN/X5k0+sxKG5loO
+Lx5b6P/7JKrG42IGxugCGc2/VCF5DghWqqKokZw/wCxhxub25VErF3xgMfAg6Bgl
+Euqd+PECgYEA61DSCuU5IGCqX9p6xR4v734cRzR0NIc5urX4yiiw1mXNvOv1Cx8R
+1BhDT1fAKDma29DAIW3R0MZuba6VFB+uYcZ2cp/r4I35IcRWXld6ya92eoO6IEN8
+R4+rlP8+AHZiR6p22A87L7ddpnE7z5n54O6N6THicsKdC1Sd+zC2WHsCgYEAxnb+
+f8y9p19Z/GPprAg1d2AuHX45HUKFmKVMetIld9ySORDsWIjIXHyAno2WunrALmUs
+znwvX8WuNYkZkbnYWAQPpIg9dlpZoLbJgT3hcq56SE4pbI6cvbYm1sof5jFv1Zi1
+5NQn3fNmq5QRHiPx0VVru+g8LdJcwXaYDO7n8MUCgYEAkqOiwLdnig2zHlh/+SZ+
+qLfl11mQsMsz5m5Pw2roCDMYqopAAdYyvgEAsQj17hs3rZPApxRQk9GULzWEIS48
+9SE/3t5Zl23hunEngVLyaYy2QFKmQkTLxax6ODd248LiK9bGiI21TF7wNTCLHSvO
+06TVOmSjwPAV/WGVsVsBxtECgYBjbwz1dNv0doZ8OIbDpV08URjpt+rfqQuMPg1C
+X/Vbx0wPgVYYyXcxN0OtrJy/E28kD5bSYU/O+RjeQ7Fm3Kjy+B3qPkQk/wF2zv3I
+XfuNXLNxdI+2jwEi35c3+A7hYxV3+8nuOwk6X4+qGUY2RqYKTnTqsWEtR/8nAscN
+e8kDTQKBgC6p5UfzUK07geZDBodKZSrb9q0CjcCAPNzA40WRSrS5Y2eY4YfnZTdr
+JXxUpG3royiAYXFAmC6Y/GVNCXHTZeLXnKtojygElv66wo6pfMA5xX8q6q/bvsZb
+KZN1JLuNetwk/caU/ZUGVTOTT/hZ9SOgGa2fj5eTJD8anpiRvktt
+-----END RSA PRIVATE KEY-----`
+)
+
+func createCerts(certFile, keyFile string) error {
+	deleteCerts(certFile, keyFile)
+
+	err := ioutil.WriteFile(certFile, []byte(certData), 0644)
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile(keyFile, []byte(keyData), 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deleteCerts(certFile, keyFile string) {
+	os.Remove(certFile)
+	os.Remove(keyFile)
 }
