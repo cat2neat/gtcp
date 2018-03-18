@@ -208,7 +208,7 @@ func TestTLSServer(t *testing.T) {
 	certFile := "server_cert.pem"
 	keyFile := "server_key.pem"
 	if err := createCerts(certFile, keyFile); err != nil {
-		t.Errorf("failed to create cert files", err)
+		t.Errorf("failed to create cert files, err=%+v\n", err)
 	}
 
 	defer deleteCerts(certFile, keyFile)
