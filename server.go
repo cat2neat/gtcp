@@ -2,6 +2,7 @@ package gtcp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"runtime"
@@ -143,20 +144,45 @@ func (s *Server) ListenerAddr() net.Addr {
 	return nil
 }
 
+func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return err
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates:             []tls.Certificate{cert},
+		PreferServerCipherSuites: true,
+	}
+
+	ln, err := s.listen()
+	if err != nil {
+		return err
+	}
+
+	ln = tls.NewListener(ln, tlsConfig)
+	return s.Serve(ln)
+}
+
 // ListenAndServe listens on the TCP network address Addr and then
 // calls Serve to handle requests on incoming connections.
 // If Addr is blank, ":1979" is used.
 // ListenAndServe always returns a non-nil error.
 func (s *Server) ListenAndServe() error {
+	ln, err := s.listen()
+	if err != nil {
+		return err
+	}
+
+	return s.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+}
+
+func (s *Server) listen() (net.Listener, error) {
 	addr := s.Addr
 	if addr == "" {
 		addr = ":1979"
 	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	return s.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+	return net.Listen("tcp", addr)
 }
 
 type tcpKeepAliveListener struct {
